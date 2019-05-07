@@ -1,0 +1,5 @@
+*.core
+*.crt
+*.key
+*.log
+*.swp
