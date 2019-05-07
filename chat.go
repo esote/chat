@@ -104,6 +104,19 @@ func printable(name string) []string {
 	return ret
 }
 
+func tryCreateRoom(name string, w http.ResponseWriter) bool {
+	if _, ok := rooms[name]; !ok {
+		if len(rooms) > maxRoomCount {
+			http.Error(w, "too many rooms", http.StatusBadRequest)
+			return false
+		}
+
+		rooms[name] = room{msgs: make([]msg, 0)}
+	}
+
+	return true
+}
+
 func get(name string, w http.ResponseWriter, r *http.Request) {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -119,13 +132,8 @@ func get(name string, w http.ResponseWriter, r *http.Request) {
 
 	pruneRooms(roomLifespan)
 
-	if _, ok := rooms[name]; !ok {
-		if len(rooms) > maxRoomCount {
-			http.Error(w, "too many rooms", http.StatusBadRequest)
-			return
-		}
-
-		rooms[name] = room{msgs: make([]msg, 0)}
+	if !tryCreateRoom(name, w) {
+		return
 	}
 
 	fmt.Fprintf(w, room_html_start, name, name)
@@ -167,10 +175,9 @@ func post(name string, w http.ResponseWriter, r *http.Request) {
 	lock.RLock()
 	defer lock.RUnlock()
 
-	rm, ok := rooms[name]
+	rm := rooms[name]
 
-	if !ok {
-		http.Error(w, "join room before posting", http.StatusBadRequest)
+	if !tryCreateRoom(name, w) {
 		return
 	}
 
