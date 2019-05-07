@@ -271,7 +271,7 @@ func main() {
 	var w sync.WaitGroup
 	w.Add(1)
 
-	graceful.Graceful(srv, func() {
+	go graceful.Graceful(srv, func() {
 		defer w.Done()
 		if err := srv.ListenAndServeTLS(cert, key); err != http.ErrServerClosed {
 			log.Fatal(err)
