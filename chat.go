@@ -74,6 +74,7 @@ const (
 	<script>
 		const http = new XMLHttpRequest();
 		const chat = document.getElementById("chat");
+		const path = window.location.pathname.split("/").pop() + "?chat";
 
 		http.onreadystatechange = function() {
 			if (http.readyState == 4 && http.responseText != "") {
@@ -82,7 +83,7 @@ const (
 		}
 
 		function update() {
-			http.open("GET", window.location.href+"?chat", true);
+			http.open("GET", path, true);
 			http.send(null);
 		}
 
@@ -97,16 +98,6 @@ func pruneRooms(lifespan time.Duration) {
 			delete(rooms, k)
 		}
 	}
-}
-
-func printable(name string) []string {
-	ret := make([]string, len(rooms[name].msgs))
-
-	for k, v := range rooms[name].msgs {
-		ret[len(ret)-k-1] = v.t + ": " + v.s
-	}
-
-	return ret
 }
 
 func tryCreateRoom(name string, w http.ResponseWriter) bool {
@@ -127,9 +118,8 @@ func get(name string, w http.ResponseWriter, r *http.Request) {
 	defer lock.RUnlock()
 
 	if _, ok := r.URL.Query()["chat"]; ok {
-		msgs := printable(name)
-		for _, m := range msgs {
-			fmt.Fprintf(w, "<pre>%s</pre>\n", m)
+		for _, m := range rooms[name].msgs {
+			fmt.Fprintf(w, "<pre>%s: %s</pre>\n", m.t, m.s)
 		}
 		w.Header().Set("Content-Type", "text/plain")
 		return
@@ -143,9 +133,8 @@ func get(name string, w http.ResponseWriter, r *http.Request) {
 
 	fmt.Fprintf(w, room_html_start, name, name)
 
-	msgs := printable(name)
-	for _, m := range msgs {
-		fmt.Fprintf(w, "<pre>%s</pre>\n", m)
+	for _, m := range rooms[name].msgs {
+		fmt.Fprintf(w, "<pre>%s: %s</pre>\n", m.t, m.s)
 	}
 
 	fmt.Fprint(w, room_html_end)
@@ -194,13 +183,13 @@ func post(name string, w http.ResponseWriter, r *http.Request) {
 	}
 
 	rm.last = time.Now()
-	rm.msgs = append(rm.msgs, msg{
+	rm.msgs = append([]msg{{
 		s: str,
 		t: rm.last.Format("2006-01-02 15:04"),
-	})
+	}}, rm.msgs...)
 
-	if l := len(rm.msgs); l > maxMsgsCount {
-		rm.msgs = rm.msgs[l-maxMsgsCount:]
+	if len(rm.msgs) > maxMsgsCount {
+		rm.msgs = rm.msgs[:maxMsgsCount]
 	}
 
 	rooms[name] = rm
