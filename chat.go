@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"html"
 	"log"
 	"net/http"
 	"os"
@@ -31,7 +32,7 @@ var (
 	lock  = sync.RWMutex{}
 
 	validName = regexp.MustCompile("^[a-z]+$")
-	validMsg  = regexp.MustCompile(`^[A-Za-z0-9 !@#$%^*()\[\]{}\-=|:;\"',./?+]+$`)
+	validMsg  = regexp.MustCompile(`^[[:print:]]+$`)
 )
 
 const (
@@ -50,8 +51,7 @@ const (
 		<input type="text" name="msg" required autofocus>
 		<input type="submit" value="msg">
 	</form>
-	<p>chat history:</p><div id="chat">
-`
+	<p>chat history:</p><div id="chat">`
 
 	room_html_end = `</div>
 	<noscript>
@@ -62,7 +62,7 @@ const (
 		const chat = document.getElementById("chat");
 
 		http.onreadystatechange = function() {
-			if (http.readyState == 4) {
+			if (http.readyState == 4 && http.responseText != "") {
 				chat.innerHTML = http.responseText;
 			}
 		}
@@ -74,13 +74,11 @@ const (
 
 		setInterval(update, 2000);
 	</script>
-</body></html>
-`
+</body></html>`
 
 	welcome_html_start = `<!DOCTYPE html>
 <html><body>
-	<p>welcome, join existing rooms:</p>
-`
+	<p>welcome, join existing rooms:</p>`
 
 	welcome_html_end = `
 	<p>or make a room: <code>/name_here</code> (max length %d)</p>
@@ -163,6 +161,8 @@ func post(name string, w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, name, http.StatusSeeOther)
 		return
 	}
+
+	str = html.EscapeString(str)
 
 	lock.RLock()
 	defer lock.RUnlock()
