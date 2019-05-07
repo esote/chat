@@ -36,12 +36,26 @@ var (
 )
 
 const (
-	maxRoomCount = 5
-	maxMsgLen    = 100
-	maxMsgsCount = 25
+	maxRoomCount = 50
+	maxMsgLen    = 200
+	maxMsgsCount = 50
 	maxNameLen   = 5
 
 	roomLifespan = 24 * time.Hour
+
+	welcome_html_start = `<!DOCTYPE html>
+<html><body>
+	<p>welcome, join existing rooms:</p>`
+
+	welcome_html_end = `
+	<p>or make a room: <code>/name_here</code> (max length %d)</p>
+	<p>room lifespan: %s (time until room pruning may occur)</p>
+	<p>Author: <a href="https://github.com/esote"
+		target="_blank">Esote</a>.
+
+		<a href="https://github.com/esote/chat"
+		target="_blank">Source code</a>.</p>
+</body></html>`
 
 	room_html_start = `<!DOCTYPE html>
 <html><body>
@@ -72,17 +86,8 @@ const (
 			http.send(null);
 		}
 
-		setInterval(update, 2000);
+		setInterval(update, 1000);
 	</script>
-</body></html>`
-
-	welcome_html_start = `<!DOCTYPE html>
-<html><body>
-	<p>welcome, join existing rooms:</p>`
-
-	welcome_html_end = `
-	<p>or make a room: <code>/name_here</code> (max length %d)</p>
-	<p>room lifespan: %s (time until room pruning may occur)</p>
 </body></html>`
 )
 
@@ -106,7 +111,7 @@ func printable(name string) []string {
 
 func tryCreateRoom(name string, w http.ResponseWriter) bool {
 	if _, ok := rooms[name]; !ok {
-		if len(rooms) > maxRoomCount {
+		if len(rooms)+1 > maxRoomCount {
 			http.Error(w, "too many rooms", http.StatusBadRequest)
 			return false
 		}
