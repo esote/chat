@@ -71,7 +71,7 @@ const (
 	<noscript>
 		<p>without JS manually refresh to page to see new messages</p>
 	</noscript>
-	<script src="/realtime.js" integrity="sha512-5wGlkRc7AyMIccTkPBZimJlB+aQoCzgC2SBqrhSOU3qOkp8mGDotWBwZ1WR/JdBzAPKXLQZ9E5GOF6veM6O7ZQ=="></script>
+	<script src="/realtime.js" integrity="sha512-ZCdVUxX4G0AmsVIZqa3kzVRr/zjHUj6vWKfDrY7SVAPvPSEBwKXqpgG6pCjyG0aUouSbtjcNUBY5XHB0c36veQ=="></script>
 </body></html>`
 )
 
@@ -97,21 +97,11 @@ func tryCreateRoom(name string, w http.ResponseWriter) bool {
 }
 
 func get(name string, w http.ResponseWriter, r *http.Request) {
-	lock.RLock()
-	defer lock.RUnlock()
-
-	if _, ok := r.URL.Query()["chat"]; ok {
-		w.Header().Set("Content-Security-Policy", "default-src 'none';")
-
-		for _, m := range rooms[name].msgs {
-			fmt.Fprintf(w, "<pre>%s: %s</pre>\n", m.t, m.s)
-		}
-		w.Header().Set("Content-Type", "text/plain")
-		return
-	}
-
 	w.Header().Set("Content-Security-Policy", "default-src 'none';"+
 		"script-src 'self'; connect-src 'self'")
+
+	lock.RLock()
+	defer lock.RUnlock()
 
 	pruneRooms()
 
@@ -126,6 +116,18 @@ func get(name string, w http.ResponseWriter, r *http.Request) {
 	}
 
 	fmt.Fprint(w, room_html_end)
+}
+
+func patch(name string, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Security-Policy", "default-src 'none';")
+	w.Header().Set("Content-Type", "text/plain")
+
+	lock.RLock()
+	defer lock.RUnlock()
+
+	for _, m := range rooms[name].msgs {
+		fmt.Fprintf(w, "<pre>%s: %s</pre>\n", m.t, m.s)
+	}
 }
 
 func post(name string, w http.ResponseWriter, r *http.Request) {
@@ -195,10 +197,12 @@ func realtime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/javascript")
+
 	fmt.Fprint(w, `"use strict";
 const http = new XMLHttpRequest();
 const chat = document.getElementById("chat");
-const path = window.location.pathname.split("/").pop() + "?chat";
+const path = window.location.pathname.split("/").pop();
 
 http.onreadystatechange = function() {
 	if (http.readyState == 4 && http.responseText != "") {
@@ -207,7 +211,7 @@ http.onreadystatechange = function() {
 }
 
 function update() {
-	http.open("GET", path, true);
+	http.open("PATCH", path, true);
 	http.send(null);
 }
 
@@ -217,7 +221,7 @@ setInterval(update, 1000);
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
-	case "GET", "POST":
+	case "GET", "PATCH", "POST":
 		break
 	default:
 		http.Error(w, "bad http verb", http.StatusMethodNotAllowed)
@@ -254,6 +258,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 		get(name, w, r)
+	case "PATCH":
+		patch(name, w, r)
 	case "POST":
 		post(name, w, r)
 	}
