@@ -147,17 +147,19 @@ func post(name string, w http.ResponseWriter, r *http.Request) {
 	}
 
 	str := r.PostFormValue("msg")
-	str = strings.Replace(str, "\r", "", -1)
 
 	if len(str) > maxMsgLen {
 		http.Error(w, "msg too long", http.StatusBadRequest)
 		return
-	} else if !validMsg.MatchString(str) {
+	}
+
+	str = strings.Replace(str, "\r", "", -1)
+	str = strings.TrimSpace(str)
+
+	if !validMsg.MatchString(str) {
 		http.Error(w, "bad msg", http.StatusBadRequest)
 		return
 	}
-
-	str = strings.TrimSpace(str)
 
 	if str == "" {
 		http.Redirect(w, r, name, http.StatusSeeOther)
@@ -226,6 +228,13 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("Strict-Transport-Security", "max-age=31536000;"+
+		"includeSubDomains;preload")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "deny")
+	w.Header().Set("X-XSS-Protection", "1")
+
 	switch r.Method {
 	case "GET":
 		get(name, w, r)
@@ -244,7 +253,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	flag.StringVar(&cert, "cert", "server.crt", "TLS cerificate file")
+	flag.StringVar(&cert, "cert", "server.crt", "TLS certificate file")
 	flag.StringVar(&key, "key", "server.key", "TLS key file")
 
 	flag.Parse()
