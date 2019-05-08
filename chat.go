@@ -41,7 +41,7 @@ const (
 	maxMsgsCount = 50
 	maxNameLen   = 5
 
-	roomLifespan = 24 * time.Hour
+	lifespan = 24 * time.Hour
 
 	welcome_html_start = `<!DOCTYPE html>
 <html><body>
@@ -49,7 +49,7 @@ const (
 
 	welcome_html_end = `
 	<p>or make a room: <code>/name_here</code> (max length %d)</p>
-	<p>room lifespan: %s (time until room pruning may occur)</p>
+	<p>room lifespan: %s (time until lossy room pruning may occur)</p>
 	<p>Author: <a href="https://github.com/esote"
 		target="_blank">Esote</a>.
 
@@ -71,28 +71,11 @@ const (
 	<noscript>
 		<p>without JS manually refresh to page to see new messages</p>
 	</noscript>
-	<script>
-		const http = new XMLHttpRequest();
-		const chat = document.getElementById("chat");
-		const path = window.location.pathname.split("/").pop() + "?chat";
-
-		http.onreadystatechange = function() {
-			if (http.readyState == 4 && http.responseText != "") {
-				chat.innerHTML = http.responseText;
-			}
-		}
-
-		function update() {
-			http.open("GET", path, true);
-			http.send(null);
-		}
-
-		setInterval(update, 1000);
-	</script>
+	<script src="/realtime.js" integrity="sha512-5wGlkRc7AyMIccTkPBZimJlB+aQoCzgC2SBqrhSOU3qOkp8mGDotWBwZ1WR/JdBzAPKXLQZ9E5GOF6veM6O7ZQ=="></script>
 </body></html>`
 )
 
-func pruneRooms(lifespan time.Duration) {
+func pruneRooms() {
 	for k, v := range rooms {
 		if time.Now().Sub(v.last) > lifespan {
 			delete(rooms, k)
@@ -118,6 +101,8 @@ func get(name string, w http.ResponseWriter, r *http.Request) {
 	defer lock.RUnlock()
 
 	if _, ok := r.URL.Query()["chat"]; ok {
+		w.Header().Set("Content-Security-Policy", "default-src 'none';")
+
 		for _, m := range rooms[name].msgs {
 			fmt.Fprintf(w, "<pre>%s: %s</pre>\n", m.t, m.s)
 		}
@@ -125,7 +110,10 @@ func get(name string, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pruneRooms(roomLifespan)
+	w.Header().Set("Content-Security-Policy", "default-src 'none';"+
+		"script-src 'self'; connect-src 'self'")
+
+	pruneRooms()
 
 	if !tryCreateRoom(name, w) {
 		return
@@ -141,6 +129,8 @@ func get(name string, w http.ResponseWriter, r *http.Request) {
 }
 
 func post(name string, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Security-Policy", "default-src 'none';")
+
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "form invalid", http.StatusBadRequest)
 		return
@@ -199,6 +189,32 @@ func post(name string, w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, name, http.StatusSeeOther)
 }
 
+func realtime(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "bad http verb", http.StatusMethodNotAllowed)
+		return
+	}
+
+	fmt.Fprint(w, `"use strict";
+const http = new XMLHttpRequest();
+const chat = document.getElementById("chat");
+const path = window.location.pathname.split("/").pop() + "?chat";
+
+http.onreadystatechange = function() {
+	if (http.readyState == 4 && http.responseText != "") {
+		chat.innerHTML = http.responseText;
+	}
+}
+
+function update() {
+	http.open("GET", path, true);
+	http.send(null);
+}
+
+setInterval(update, 1000);
+`)
+}
+
 func handler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET", "POST":
@@ -218,7 +234,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				name)
 		}
 		lock.RUnlock()
-		fmt.Fprintf(w, welcome_html_end, maxNameLen, roomLifespan)
+		fmt.Fprintf(w, welcome_html_end, maxNameLen, lifespan)
 		return
 	} else if len(name) > maxNameLen {
 		http.Error(w, "name too long", http.StatusBadRequest)
@@ -271,9 +287,14 @@ func main() {
 		},
 	}
 
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/", handler)
+	mux.HandleFunc("/realtime.js", realtime)
+
 	srv := &http.Server{
 		Addr:         ":8444",
-		Handler:      http.HandlerFunc(handler),
+		Handler:      mux,
 		TLSConfig:    cfg,
 		TLSNextProto: nil,
 	}
@@ -293,6 +314,23 @@ func main() {
 	if _, err := openshim.Pledge("stdio rpath inet", ""); err != nil {
 		log.Fatal(err)
 	}
+
+	ticker := time.NewTicker(lifespan)
+	quit := make(chan struct{})
+
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				lock.RLock()
+				pruneRooms()
+				lock.RUnlock()
+			case <-quit:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
 
 	w.Wait()
 }
