@@ -29,7 +29,7 @@ type room struct {
 
 var (
 	rooms = make(map[string]room)
-	lock  = sync.RWMutex{}
+	lock  = sync.Mutex{}
 
 	validName = regexp.MustCompile("^[a-z]+$")
 	validMsg  = regexp.MustCompile(`^[[:print:]]+$`)
@@ -100,9 +100,6 @@ func get(name string, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", "default-src 'none';"+
 		"script-src 'self'; connect-src 'self'")
 
-	lock.RLock()
-	defer lock.RUnlock()
-
 	pruneRooms()
 
 	if !tryCreateRoom(name, w) {
@@ -121,9 +118,6 @@ func get(name string, w http.ResponseWriter, r *http.Request) {
 func patch(name string, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", "default-src 'none';")
 	w.Header().Set("Content-Type", "text/plain")
-
-	lock.RLock()
-	defer lock.RUnlock()
 
 	for _, m := range rooms[name].msgs {
 		fmt.Fprintf(w, "<pre>%s: %s</pre>\n", m.t, m.s)
@@ -160,14 +154,11 @@ func post(name string, w http.ResponseWriter, r *http.Request) {
 
 	str = html.EscapeString(str)
 
-	lock.RLock()
-	defer lock.RUnlock()
-
-	rm := rooms[name]
-
 	if !tryCreateRoom(name, w) {
 		return
 	}
+
+	rm := rooms[name]
 
 	for _, m := range rm.msgs {
 		if m.s == str {
@@ -232,12 +223,12 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	if name == "" {
 		fmt.Fprint(w, welcome_html_start)
-		lock.RLock()
+		lock.Lock()
 		for name := range rooms {
 			fmt.Fprintf(w, `<p><a href="/%s">%s &gt;</a></p>`, name,
 				name)
 		}
-		lock.RUnlock()
+		lock.Unlock()
 		fmt.Fprintf(w, welcome_html_end, maxNameLen, lifespan)
 		return
 	} else if len(name) > maxNameLen {
@@ -255,6 +246,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Frame-Options", "deny")
 	w.Header().Set("X-XSS-Protection", "1")
 
+	lock.Lock()
 	switch r.Method {
 	case "GET":
 		get(name, w, r)
@@ -263,6 +255,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	case "POST":
 		post(name, w, r)
 	}
+	lock.Unlock()
 }
 
 func main() {
@@ -328,9 +321,9 @@ func main() {
 		for {
 			select {
 			case <-ticker.C:
-				lock.RLock()
+				lock.Lock()
 				pruneRooms()
-				lock.RUnlock()
+				lock.Unlock()
 			case <-quit:
 				ticker.Stop()
 				return
