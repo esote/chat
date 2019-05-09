@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -14,7 +15,7 @@ import (
 	"time"
 
 	"github.com/esote/graceful"
-	"github.com/esote/openshim"
+	"golang.org/x/sys/unix"
 )
 
 type msg struct {
@@ -259,12 +260,27 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	// force init of lazy sysctls
+	if l, err := net.Listen("tcp", "localhost:0"); err != nil {
+		log.Fatal(err)
+	} else {
+		l.Close()
+	}
+
+	if err := unix.Pledge("stdio rpath inet unveil", ""); err != nil {
+		log.Fatal(err)
+	}
+
 	var (
 		cert string
 		key  string
 	)
 
-	if _, err := openshim.Unveil("/etc/letsencrypt/archive/", "r"); err != nil {
+	if err := unix.Unveil("/etc/letsencrypt/archive/", "r"); err != nil {
+		log.Fatal(err)
+	}
+
+	if err := unix.Pledge("stdio rpath inet", ""); err != nil {
 		log.Fatal(err)
 	}
 
@@ -298,22 +314,6 @@ func main() {
 		TLSNextProto: nil,
 	}
 
-	var w sync.WaitGroup
-	w.Add(1)
-
-	go graceful.Graceful(srv, func() {
-		defer w.Done()
-		if err := srv.ListenAndServeTLS(cert, key); err != http.ErrServerClosed {
-			log.Fatal(err)
-		}
-	}, os.Interrupt)
-
-	time.Sleep(time.Millisecond)
-
-	if _, err := openshim.Pledge("stdio rpath inet", ""); err != nil {
-		log.Fatal(err)
-	}
-
 	ticker := time.NewTicker(lifespan)
 	quit := make(chan struct{})
 
@@ -331,5 +331,9 @@ func main() {
 		}
 	}()
 
-	w.Wait()
+	graceful.Graceful(srv, func() {
+		if err := srv.ListenAndServeTLS(cert, key); err != http.ErrServerClosed {
+			log.Fatal(err)
+		}
+	}, os.Interrupt)
 }
