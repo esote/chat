@@ -50,6 +50,7 @@ const (
 
 	welcome_html_end = `
 	<p>or make a room: <code>/name_here</code> (max length %d)</p>
+	<p>chat is not moderated, and no connection logs are kept</p>
 	<p>room lifespan: %s (time until lossy room pruning may occur)</p>
 	<p>Author: <a href="https://github.com/esote"
 		target="_blank">Esote</a>.
@@ -66,7 +67,7 @@ const (
 		<input type="text" name="msg" required autofocus>
 		<input type="submit" value="msg">
 	</form>
-	<p>chat history:</p><div id="chat">`
+	<p>chat history (time in UTC):</p><div id="chat">`
 
 	room_html_end = `</div>
 	<noscript>
@@ -74,11 +75,30 @@ const (
 	</noscript>
 	<script src="/realtime.js" integrity="sha512-ZCdVUxX4G0AmsVIZqa3kzVRr/zjHUj6vWKfDrY7SVAPvPSEBwKXqpgG6pCjyG0aUouSbtjcNUBY5XHB0c36veQ=="></script>
 </body></html>`
+
+	realtime_js = `"use strict";
+const http = new XMLHttpRequest();
+const chat = document.getElementById("chat");
+const path = window.location.pathname.split("/").pop();
+
+http.onreadystatechange = function() {
+	if (http.readyState == 4 && http.responseText != "") {
+		chat.innerHTML = http.responseText;
+	}
+}
+
+function update() {
+	http.open("PATCH", path, true);
+	http.send(null);
+}
+
+setInterval(update, 1000);
+`
 )
 
 func pruneRooms() {
 	for k, v := range rooms {
-		if time.Now().Sub(v.last) > lifespan {
+		if time.Now().UTC().Sub(v.last) > lifespan {
 			delete(rooms, k)
 		}
 	}
@@ -98,14 +118,14 @@ func tryCreateRoom(name string, w http.ResponseWriter) bool {
 }
 
 func get(name string, w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Security-Policy", "default-src 'none';"+
-		"script-src 'self'; connect-src 'self'")
-
 	pruneRooms()
 
 	if !tryCreateRoom(name, w) {
 		return
 	}
+
+	w.Header().Set("Content-Security-Policy", "default-src 'none';"+
+		"script-src 'self'; connect-src 'self'")
 
 	fmt.Fprintf(w, room_html_start, name, name)
 
@@ -126,8 +146,6 @@ func patch(name string, w http.ResponseWriter, r *http.Request) {
 }
 
 func post(name string, w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Security-Policy", "default-src 'none';")
-
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "form invalid", http.StatusBadRequest)
 		return
@@ -168,7 +186,9 @@ func post(name string, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	rm.last = time.Now()
+	w.Header().Set("Content-Security-Policy", "default-src 'none';")
+
+	rm.last = time.Now().UTC()
 	rm.msgs = append([]msg{{
 		s: str,
 		t: rm.last.Format("2006-01-02 15:04"),
@@ -189,26 +209,10 @@ func realtime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Content-Security-Policy", "default-src 'none';")
 	w.Header().Set("Content-Type", "application/javascript")
 
-	fmt.Fprint(w, `"use strict";
-const http = new XMLHttpRequest();
-const chat = document.getElementById("chat");
-const path = window.location.pathname.split("/").pop();
-
-http.onreadystatechange = function() {
-	if (http.readyState == 4 && http.responseText != "") {
-		chat.innerHTML = http.responseText;
-	}
-}
-
-function update() {
-	http.open("PATCH", path, true);
-	http.send(null);
-}
-
-setInterval(update, 1000);
-`)
+	fmt.Fprint(w, realtime_js)
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
