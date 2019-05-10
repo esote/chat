@@ -267,15 +267,6 @@ func main() {
 		l.Close()
 	}
 
-	if err := unix.Pledge("stdio rpath inet unveil", ""); err != nil {
-		log.Fatal(err)
-	}
-
-	var (
-		cert string
-		key  string
-	)
-
 	if err := unix.Unveil("/etc/letsencrypt/archive/", "r"); err != nil {
 		log.Fatal(err)
 	}
@@ -284,10 +275,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	flag.StringVar(&cert, "cert", "server.crt", "TLS certificate file")
-	flag.StringVar(&key, "key", "server.key", "TLS key file")
-
-	flag.Parse()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", handler)
+	mux.HandleFunc("/realtime.js", realtime)
 
 	cfg := &tls.Config{
 		MinVersion: tls.VersionTLS12,
@@ -302,11 +292,6 @@ func main() {
 		},
 	}
 
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/", handler)
-	mux.HandleFunc("/realtime.js", realtime)
-
 	srv := &http.Server{
 		Addr:         ":8444",
 		Handler:      mux,
@@ -314,10 +299,10 @@ func main() {
 		TLSNextProto: nil,
 	}
 
-	ticker := time.NewTicker(lifespan)
-	quit := make(chan struct{})
-
 	go func() {
+		ticker := time.NewTicker(lifespan)
+		quit := make(chan struct{})
+
 		for {
 			select {
 			case <-ticker.C:
@@ -330,6 +315,16 @@ func main() {
 			}
 		}
 	}()
+
+	var (
+		cert string
+		key  string
+	)
+
+	flag.StringVar(&cert, "cert", "server.crt", "TLS certificate file")
+	flag.StringVar(&key, "key", "server.key", "TLS key file")
+
+	flag.Parse()
 
 	graceful.Graceful(srv, func() {
 		if err := srv.ListenAndServeTLS(cert, key); err != http.ErrServerClosed {
