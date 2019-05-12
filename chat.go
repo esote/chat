@@ -52,6 +52,7 @@ const (
 		content="width=device-width, initial-scale=1, shrink-to-fit=no">
 	<meta name="author" content="Esote">
 	<meta name="description" content="Room-based chat server">
+	<title>Room-based chat server</title>
 </head>
 <body>
 	<p>welcome, join existing rooms:</p>`
@@ -79,6 +80,7 @@ const (
 	<meta charset="utf-8">
 	<meta name="viewport"
 		content="width=device-width, initial-scale=1, shrink-to-fit=no">
+	<title>Room: %s</title>
 </head>
 <body>
 	<p>room: %s</p>
@@ -93,7 +95,7 @@ const (
 	<noscript>
 		<p>without JS manually refresh to page to see new messages</p>
 	</noscript>
-	<script src="/realtime.js" integrity="sha512-ZCdVUxX4G0AmsVIZqa3kzVRr/zjHUj6vWKfDrY7SVAPvPSEBwKXqpgG6pCjyG0aUouSbtjcNUBY5XHB0c36veQ=="></script>
+	<script src="/realtime.js" integrity="sha512-+1INo3ZKQFSCijyLvXUVgQI00PLvSRnaqMZzUOqVW2bLzq8u6Bs0NdJci1GSAkLAmMvEdY3rkKNQPzPcn/XUMQ=="></script>
 </body>
 </html>`
 
@@ -103,7 +105,8 @@ const chat = document.getElementById("chat");
 const path = window.location.pathname.split("/").pop();
 
 http.onreadystatechange = function() {
-	if (http.readyState == 4 && http.responseText != "") {
+	if (http.readyState == 4 && http.responseText != ""
+		&& http.responseText != chat.innerHTML) {
 		chat.innerHTML = http.responseText;
 	}
 }
@@ -158,7 +161,7 @@ func get(name string, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", "default-src 'none';"+
 		"script-src 'self'; connect-src 'self'")
 
-	fmt.Fprintf(w, room_html_start, name, name, maxMsgLen)
+	fmt.Fprintf(w, room_html_start, name, name, name, maxMsgLen)
 	printChat(name, w)
 	fmt.Fprint(w, room_html_end)
 }
