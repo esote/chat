@@ -32,24 +32,37 @@ var (
 	rooms = make(map[string]room)
 	lock  = sync.Mutex{}
 
-	validName = regexp.MustCompile("^[a-z]+$")
+	validName = regexp.MustCompile("^[a-z]*$")
 	validMsg  = regexp.MustCompile(`^[[:print:]]+$`)
 )
 
 const (
 	maxRoomCount = 50
-	maxMsgLen    = 200
+	maxMsgLen    = 80
 	maxMsgsCount = 50
 	maxNameLen   = 5
 
 	lifespan = 24 * time.Hour
 
 	welcome_html_start = `<!DOCTYPE html>
-<html><body>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport"
+		content="width=device-width, initial-scale=1, shrink-to-fit=no">
+	<meta name="author" content="Esote">
+	<meta name="description" content="Room-based chat server">
+</head>
+<body>
 	<p>welcome, join existing rooms:</p>`
 
 	welcome_html_end = `
-	<p>or make a room: <code>/name_here</code> (max length %d)</p>
+	<form action="/" method="get" autocomplete="off">
+		<label>or make a room: </label>
+		<input type="text" name="name" required placeholder="name_here"
+			maxlength="%d" pattern="%s" title="lowercase letters">
+		<input type="submit" value="make room">
+	</form>
 	<p>chat is not moderated, and no connection logs are kept</p>
 	<p>room lifespan: %s (time until lossy room pruning may occur)</p>
 	<p>Author: <a href="https://github.com/esote"
@@ -57,14 +70,21 @@ const (
 
 		<a href="https://github.com/esote/chat"
 		target="_blank">Source code</a>.</p>
-</body></html>`
+</body>
+</html>`
 
 	room_html_start = `<!DOCTYPE html>
-<html><body>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport"
+		content="width=device-width, initial-scale=1, shrink-to-fit=no">
+</head>
+<body>
 	<p>room: %s</p>
 	<p><a href="/">&lt; back</a></p>
-	<form action="%s" method="post">
-		<input type="text" name="msg" required autofocus>
+	<form action="%s" method="post" autocomplete="off">
+		<input type="text" name="msg" required autofocus maxlength="%d">
 		<input type="submit" value="msg">
 	</form>
 	<p>chat history (time in UTC):</p><div id="chat">`
@@ -74,7 +94,8 @@ const (
 		<p>without JS manually refresh to page to see new messages</p>
 	</noscript>
 	<script src="/realtime.js" integrity="sha512-ZCdVUxX4G0AmsVIZqa3kzVRr/zjHUj6vWKfDrY7SVAPvPSEBwKXqpgG6pCjyG0aUouSbtjcNUBY5XHB0c36veQ=="></script>
-</body></html>`
+</body>
+</html>`
 
 	realtime_js = `"use strict";
 const http = new XMLHttpRequest();
@@ -117,6 +138,16 @@ func tryCreateRoom(name string, w http.ResponseWriter) bool {
 	return true
 }
 
+func printChat(name string, w http.ResponseWriter) {
+	fmt.Fprintf(w, "<pre>")
+
+	for _, m := range rooms[name].msgs {
+		fmt.Fprintf(w, "%s: %s\n\n", m.t, m.s)
+	}
+
+	fmt.Fprintf(w, "</pre>")
+}
+
 func get(name string, w http.ResponseWriter, r *http.Request) {
 	pruneRooms()
 
@@ -127,12 +158,8 @@ func get(name string, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", "default-src 'none';"+
 		"script-src 'self'; connect-src 'self'")
 
-	fmt.Fprintf(w, room_html_start, name, name)
-
-	for _, m := range rooms[name].msgs {
-		fmt.Fprintf(w, "<pre>%s: %s</pre>\n", m.t, m.s)
-	}
-
+	fmt.Fprintf(w, room_html_start, name, name, maxMsgLen)
+	printChat(name, w)
 	fmt.Fprint(w, room_html_end)
 }
 
@@ -140,9 +167,7 @@ func patch(name string, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", "default-src 'none';")
 	w.Header().Set("Content-Type", "text/plain")
 
-	for _, m := range rooms[name].msgs {
-		fmt.Fprintf(w, "<pre>%s: %s</pre>\n", m.t, m.s)
-	}
+	printChat(name, w)
 }
 
 func post(name string, w http.ResponseWriter, r *http.Request) {
@@ -203,6 +228,21 @@ func post(name string, w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, name, http.StatusSeeOther)
 }
 
+func home(w http.ResponseWriter, r *http.Request) {
+	if name := r.URL.Query().Get("name"); name != "" {
+		http.Redirect(w, r, "/"+name, http.StatusSeeOther)
+		return
+	}
+
+	fmt.Fprint(w, welcome_html_start)
+	for name := range rooms {
+		fmt.Fprintf(w, `<p><a href="/%s">%s &gt;</a></p>`, name,
+			name)
+	}
+	fmt.Fprintf(w, welcome_html_end, maxNameLen, validName.String(),
+		lifespan)
+}
+
 func realtime(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		http.Error(w, "bad http verb", http.StatusMethodNotAllowed)
@@ -226,17 +266,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	name := r.URL.Path[1:]
 
-	if name == "" {
-		fmt.Fprint(w, welcome_html_start)
-		lock.Lock()
-		for name := range rooms {
-			fmt.Fprintf(w, `<p><a href="/%s">%s &gt;</a></p>`, name,
-				name)
-		}
-		lock.Unlock()
-		fmt.Fprintf(w, welcome_html_end, maxNameLen, lifespan)
-		return
-	} else if len(name) > maxNameLen {
+	if len(name) > maxNameLen {
 		http.Error(w, "name too long", http.StatusBadRequest)
 		return
 	} else if !validName.MatchString(name) {
@@ -252,14 +282,20 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-XSS-Protection", "1")
 
 	lock.Lock()
-	switch r.Method {
-	case "GET":
-		get(name, w, r)
-	case "PATCH":
-		patch(name, w, r)
-	case "POST":
-		post(name, w, r)
+
+	if name == "" {
+		home(w, r)
+	} else {
+		switch r.Method {
+		case "GET":
+			get(name, w, r)
+		case "PATCH":
+			patch(name, w, r)
+		case "POST":
+			post(name, w, r)
+		}
 	}
+
 	lock.Unlock()
 }
 
