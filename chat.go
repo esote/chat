@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/tls"
-	"flag"
 	"fmt"
 	"html"
 	"log"
@@ -310,11 +308,7 @@ func main() {
 		l.Close()
 	}
 
-	if err := unix.Unveil("/etc/letsencrypt/archive/", "r"); err != nil {
-		log.Fatal(err)
-	}
-
-	if err := unix.Pledge("stdio rpath inet", ""); err != nil {
+	if err := unix.Pledge("stdio inet", ""); err != nil {
 		log.Fatal(err)
 	}
 
@@ -322,24 +316,9 @@ func main() {
 	mux.HandleFunc("/", handler)
 	mux.HandleFunc("/realtime.js", realtime)
 
-	cfg := &tls.Config{
-		MinVersion: tls.VersionTLS12,
-		CurvePreferences: []tls.CurveID{
-			tls.CurveP521,
-			tls.X25519,
-		},
-		PreferServerCipherSuites: true,
-		CipherSuites: []uint16{
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-		},
-	}
-
 	srv := &http.Server{
-		Addr:         ":8444",
-		Handler:      mux,
-		TLSConfig:    cfg,
-		TLSNextProto: nil,
+		Addr:    ":8444",
+		Handler: mux,
 	}
 
 	go func() {
@@ -359,18 +338,8 @@ func main() {
 		}
 	}()
 
-	var (
-		cert string
-		key  string
-	)
-
-	flag.StringVar(&cert, "cert", "server.crt", "TLS certificate file")
-	flag.StringVar(&key, "key", "server.key", "TLS key file")
-
-	flag.Parse()
-
 	graceful.Graceful(srv, func() {
-		if err := srv.ListenAndServeTLS(cert, key); err != http.ErrServerClosed {
+		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 			log.Fatal(err)
 		}
 	}, os.Interrupt)
