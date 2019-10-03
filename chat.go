@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"html"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -13,7 +12,7 @@ import (
 	"time"
 
 	"github.com/esote/graceful"
-	"golang.org/x/sys/unix"
+	"github.com/esote/openshim2"
 )
 
 type msg struct {
@@ -42,7 +41,7 @@ const (
 
 	lifespan = 24 * time.Hour
 
-	welcome_html_start = `<!DOCTYPE html>
+	welcomeStart = `<!DOCTYPE html>
 <html lang="en">
 <head>
 	<meta charset="utf-8">
@@ -55,7 +54,7 @@ const (
 <body>
 	<p>welcome, join existing rooms:</p>`
 
-	welcome_html_end = `
+	welcomeEnd = `
 	<form action="/" method="get" autocomplete="off">
 		<label>or make a room: </label>
 		<input type="text" name="name" required placeholder="name_here"
@@ -72,7 +71,7 @@ const (
 </body>
 </html>`
 
-	room_html_start = `<!DOCTYPE html>
+	roomStart = `<!DOCTYPE html>
 <html lang="en">
 <head>
 	<meta charset="utf-8">
@@ -89,7 +88,7 @@ const (
 	</form>
 	<p>chat history (time in UTC):</p><div id="chat">`
 
-	room_html_end = `</div>
+	roomEnd = `</div>
 	<noscript>
 		<p>without JS manually refresh to page to see new messages</p>
 	</noscript>
@@ -97,7 +96,7 @@ const (
 </body>
 </html>`
 
-	realtime_js = `"use strict";
+	realtimeJS = `"use strict";
 const http = new XMLHttpRequest();
 const chat = document.getElementById("chat");
 const path = window.location.pathname.split("/").pop();
@@ -159,9 +158,9 @@ func get(name string, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", "default-src 'none';"+
 		"script-src 'self'; connect-src 'self'")
 
-	fmt.Fprintf(w, room_html_start, name, name, name, maxMsgLen)
+	fmt.Fprintf(w, roomStart, name, name, name, maxMsgLen)
 	printChat(name, w)
-	fmt.Fprint(w, room_html_end)
+	fmt.Fprint(w, roomEnd)
 }
 
 func patch(name string, w http.ResponseWriter, r *http.Request) {
@@ -235,12 +234,12 @@ func home(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Fprint(w, welcome_html_start)
+	fmt.Fprint(w, welcomeStart)
 	for name := range rooms {
 		fmt.Fprintf(w, `<p><a href="/%s">%s &gt;</a></p>`, name,
 			name)
 	}
-	fmt.Fprintf(w, welcome_html_end, maxNameLen, validName.String(),
+	fmt.Fprintf(w, welcomeEnd, maxNameLen, validName.String(),
 		lifespan)
 }
 
@@ -253,7 +252,7 @@ func realtime(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", "default-src 'none';")
 	w.Header().Set("Content-Type", "application/javascript")
 
-	fmt.Fprint(w, realtime_js)
+	fmt.Fprint(w, realtimeJS)
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -301,14 +300,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	// force init of lazy sysctls
-	if l, err := net.Listen("tcp", "localhost:0"); err != nil {
+	if err := openshim2.LazySysctls(); err != nil {
 		log.Fatal(err)
-	} else {
-		l.Close()
 	}
 
-	if err := unix.Pledge("stdio inet", ""); err != nil {
+	if err := openshim2.Pledge("stdio inet", ""); err != nil {
 		log.Fatal(err)
 	}
 
